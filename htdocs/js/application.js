@@ -218,7 +218,7 @@ Ext.onReady(function(){
 		tbar: [{
 			text: 'new Folder',
 			xtype: 'button',
-			icon: 'static/icons/folder_add.png',
+			icon: 'icons/folder_add.png',
 			handler: function() {
 				Ext.MessageBox.prompt('Create Folder', 'please enter folder name:', function( btn, text ) {
 
@@ -247,7 +247,7 @@ Ext.onReady(function(){
 		},{
 			text: 'new File',
 			xtype: 'button',
-			icon: 'static/icons/application_form_add.png',
+			icon: 'icons/application_form_add.png',
 			handler: function() {
 				var selectedNode = tree.getSelectionModel().getSelection();
 
@@ -287,7 +287,7 @@ Ext.onReady(function(){
 		},{
 			text: 'delete',
 			xtype: 'button',
-			icon: 'static/icons/delete_icon.png',
+			icon: 'icons/delete_icon.png',
 			handler: function() {
 
 				if( tree.getSelectionModel().hasSelection() ) {
@@ -374,7 +374,7 @@ Ext.onReady(function(){
 			xtype: 'button',
 			id: 'clearFilter',
 			tooltip: 'clears the search filter',
-			icon: 'static/icons/arrow_undo.png',
+			icon: 'icons/arrow_undo.png',
 			text: 'clear',
 			disabled: true,
 			handler: function() {
@@ -622,7 +622,7 @@ Ext.onReady(function(){
 		},{
 			xtype: 'button',
 			id: 'clearSyntaxFilter',
-			icon: 'static/icons/arrow_undo.png',
+			icon: 'icons/arrow_undo.png',
 			disabled: true,
 			text: 'clear',
 			handler: function(){
@@ -647,7 +647,7 @@ Ext.onReady(function(){
 			},{
 				xtype: 'button',
 				text: 'save',
-				icon: 'static/icons/script_save.png',
+				icon: 'icons/script_save.png',
 				id: 'saveButton',
 				scale: 'small',
 				disabled: true,
@@ -674,7 +674,7 @@ Ext.onReady(function(){
 				xtype: 'button',
 				text: 'run Test',
 				id: 'runTest',
-				icon: 'static/icons/control_play_blue.png',
+				icon: 'icons/control_play_blue.png',
 				disabled: true,
 				scale: 'small',
 				handler: function() {
@@ -706,7 +706,7 @@ Ext.onReady(function(){
 				xtype: 'button',
 				text: 'reload',
 				id: 'reloadFile',
-				icon: 'static/icons/arrow_refresh.png',
+				icon: 'icons/arrow_refresh.png',
 				disabled: true,
 				scale: 'small',
 				handler: function( view, record, item, index, e ) {
