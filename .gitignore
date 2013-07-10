@@ -3,6 +3,7 @@ build/
 nbbuild/
 dist/
 nbdist/
+.idea/
 nbactions.xml
 nb-configuration.xml
 local_config.php
