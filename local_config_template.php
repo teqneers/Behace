@@ -2,5 +2,5 @@
 ###########################################
 # DEFINES
 ###########################################
-define( 'PATHTOBEHAT','/path/to/behat/' );
+define ('PATHTOBEHAT', '/path/to/behat/');
 ?>
