@@ -7,12 +7,20 @@ It is based on the Ace Editor and wrapped in the ExtJS Framework.
 What Behace is capable off...
 -------
 
--  Behace contains a behat syntax highlighting for typical catchwords(like 'Scenario', 'Given', 'When', 'Then' ,etc.) and quoted variable values
+- basic editor features like cut, edit, paste, undo, redo,...
+- Behace contains a behat syntax highlighting for typical catchwords(like 'Scenario', 'Given', 'When', 'Then' ,etc.) and quoted variable values
 -	Write 'feature' files supported by the code completion for implemented sentences 
 -	Organise and search in your 'feature' folder- and file-structure within Behace
 -	Run your behat tests directly in the browser and check the results
+- selective test runs (mark certain scenarios in a feature file)
 -	Open your feature-files simultaneously in a tab-structure
 -	Review and filter all available sentences in a collapsible list
+-	lock the editor (read only state)
+-	search through the displayed feature file
+-	a Settings window for defining basic Ace and Behat settings
+	-	Ace: ace themes, font-size, line highlighting,...
+	-	Behat: output format, flags for color and path output
+-	handling for unsaved changes when closing a tab
 
 ...and what it is not
 -------
@@ -33,7 +41,7 @@ Included
 -------
 
 -	[Ace Editor](http://ace.ajax.org/)
--	[ExtJS 4.0.7](http://www.sencha.com/products/extjs/)
+-	[ExtJS 4.2.1](http://www.sencha.com/products/extjs/)
 
 Set up Behace
 -------
