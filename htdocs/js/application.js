@@ -10,8 +10,6 @@ Ext.require([
 //####################################
 // INITS
 //####################################
-
-// editor settings
 var editorSettings				= {};
 editorSettings['fontSize']		= 12;
 editorSettings['tabSize']		= 4;
@@ -42,17 +40,93 @@ Ext.QuickTips.init();
 // clipboard for copy paste cut
 var clipboard	= null;
 
+//###############################
+// STORES
+//###############################
+var store	= Ext.create('Ext.data.TreeStore', {
+	proxy: {
+		type: 'ajax',
+		url: 'ajax_behat.php?route=getDirList'
+	},
+	folderSort: true,
+	autoLoad: true,
+	sorters: [{
+		property: 'text',
+		direction: 'ASC'
+	}]
+});
+
+var wordStore	= Ext.create('Ext.data.Store', {
+	storeId: 'behatSyntaxStore',
+	fields: ['code', 'group'],
+	autoLoad: true,
+	sortOnFilter: true,
+	proxy: {
+		type: 'ajax',
+		url: 'ajax_behat.php?route=getSyntaxList',
+		reader: {
+			type: 'json',
+			root: 'items'
+		}
+	},
+	groupers:[{ property: 'group', direction: 'ASC' }]
+});
+
+var autoCoStore	= Ext.create('Ext.data.Store', {
+	storeId: 'behatSyntaxStore',
+	fields: ['code'],
+	autoLoad: true,
+	sortOnFilter: true,
+	proxy: {
+		type: 'ajax',
+		url: 'ajax_behat.php?route=getSyntaxList',
+		reader: {
+			type: 'json',
+			root: 'items'
+		}
+	},
+	sorters:[{
+		property: 'code',
+		direction: 'ASC'
+	}]
+});
+
+
+// available themes
+var themeList = Ext.create('Ext.data.Store', {
+	fields: ['name', 'theme'],
+	data : [
+		{"name":"textmate", "theme":"textmate"},
+		{"name":"ambiance", "theme":"ambiance"},
+		{"name":"chrome", "theme":"chrome"},
+		{"name":"crimson_editor", "theme":"crimson"},
+		{"name":"idle_fingers", "theme":"idle"},
+		{"name":"merbivore", "theme":"merbivore"},
+		{"name":"merbivore_soft", "theme":"merbivore soft"},
+		{"name":"twilight", "theme":"twilight"},
+		{"name":"vibrant_ink", "theme":"vibrant ink"}
+	]
+});
+
+// available behat output formats
+var behatOutputList = Ext.create('Ext.data.Store', {
+	fields: ['name', 'output'],
+	data : [
+		{"name":"pretty", "output":"pretty"},
+		{"name":"progress", "output":"progress"}
+	]
+});
+
 //####################################
 // FUNCTIONS
 //####################################
-
 /*
  * filters the associated line for %value, %type or %number and saves it in an array. Thereafter starts searching the first occurrence
  */
 function searchNeedle() {
 	editorFocus();
 	var pos				= editor.selection.getCursor();
-	rowValue			= editor.session.getLine(pos.row);
+	rowValue			= editor.getSession().getLine(pos.row);
 	window.searchPos	= 0;
 	window.needlePos	= rowValue.split(' ');
 	window.isSearch		= true;
@@ -203,83 +277,6 @@ function enableButtons() {
 	Ext.getCmp('readOnlyButton').enable();
 }
 
-//###############################
-// STORES
-//###############################
-var store	= Ext.create('Ext.data.TreeStore', {
-	proxy: {
-		type: 'ajax',
-		url: 'ajax_behat.php?route=getDirList'
-	},
-	folderSort: true,
-	autoLoad: true,
-	sorters: [{
-		property: 'text',
-		direction: 'ASC'
-	}]
-});
-
-var wordStore	= Ext.create('Ext.data.Store', {
-	storeId: 'behatSyntaxStore',
-	fields: ['code', 'group'],
-	autoLoad: true,
-	sortOnFilter: true,
-	proxy: {
-		type: 'ajax',
-		url: 'ajax_behat.php?route=getSyntaxList',
-		reader: {
-			type: 'json',
-			root: 'items'
-		}
-	},
-	groupers:[{ property: 'group', direction: 'ASC' }]
-});
-
-var autoCoStore	= Ext.create('Ext.data.Store', {
-	storeId: 'behatSyntaxStore',
-	fields: ['code'],
-	autoLoad: true,
-	sortOnFilter: true,
-	proxy: {
-		type: 'ajax',
-		url: 'ajax_behat.php?route=getSyntaxList',
-		reader: {
-			type: 'json',
-			root: 'items'
-		}
-	},
-	sorters:[{
-		property: 'code',
-		direction: 'ASC'
-	}]
-});
-
-
-// available themes
-var themeList = Ext.create('Ext.data.Store', {
-	fields: ['name', 'theme'],
-	data : [
-		{"name":"textmate", "theme":"textmate"},
-		{"name":"ambiance", "theme":"ambiance"},
-		{"name":"chrome", "theme":"chrome"},
-		{"name":"crimson_editor", "theme":"crimson"},
-		{"name":"idle_fingers", "theme":"idle"},
-		{"name":"merbivore", "theme":"merbivore"},
-		{"name":"merbivore_soft", "theme":"merbivore soft"},
-		{"name":"twilight", "theme":"twilight"},
-		{"name":"vibrant_ink", "theme":"vibrant ink"}
-	]
-});
-
-// available behat output formats
-var behatOutputList = Ext.create('Ext.data.Store', {
-	fields: ['name', 'output'],
-	data : [
-		{"name":"pretty", "output":"pretty"},
-		{"name":"progress", "output":"progress"}
-	]
-});
-
 //####################################
 // onREADY
 //####################################
@@ -393,7 +390,52 @@ Ext.onReady(function() {
 													title: 'Status',
 													msg: 'File changed! <br />Would you like to save your changes?',
 													buttons: Ext.MessageBox.YESNOCANCEL,
-													fn: onCloseTab
+													fn: function onCloseTab(btn) {
+														var tab	= Ext.getCmp('tabPanel').getActiveTab();
+														switch(btn) {
+															case 'no':
+																destroyEditor(tab.id);
+																tab.events.beforeclose.clearListeners();
+																tab.close();
+																return false;
+																break;
+															case 'yes':
+																saveMask.show();
+																Ext.Ajax.request({
+																	url: 'ajax_behat.php',
+																	method: 'post',
+																	params: {
+																		route: 'saveFile',
+																		id: getFileId(tabPanel.getActiveTab().id),
+																		fileName : tabPanel.getActiveTab().title,
+																		content: editor.getSession().getValue()
+																	},
+																	success: function(response) {
+																		var answer	= response.responseText;
+																		if (answer !== 'File saved successfully!') {
+																			Ext.create('Ext.window.Window', {
+																				title: 'Status',
+																				autoScroll: true,
+																				height: 250,
+																				width: 600,
+																				layout: 'fit',
+																				html: '<pre>'+answer+'</pre>'
+																			}).show();
+																		}
+																		saveMask.hide();
+																		editorFocus();
+																		tabPanel.doLayout();
+																		destroyEditor(tab.id);
+																		tab.events.beforeclose.clearListeners();
+																		tab.close();
+																		return false;
+																	}
+																})
+																break;
+															case 'cancel':
+																break;
+														}
+													}
 												})
 											} else {
 												destroyEditor(tab.id);
@@ -420,7 +462,7 @@ Ext.onReady(function() {
 									var dispPos	= editor.renderer.textToScreenCoordinates(pos.row, pos.column);
 
 									//show the autocomplete
-									window.rowValue	= editor.session.getLine(pos.row);
+									window.rowValue	= editor.getSession().getLine(pos.row);
 									rowValue.trim();
 
 									//activation after 4 chars
@@ -439,10 +481,10 @@ Ext.onReady(function() {
 
 											//run up the lines until the editor finds when, then or given!
 											while (row != 1) {
-												if (editor.session.getLine(row).split(' ')[0].trim() == 'And') {
+												if (editor.getSession().getLine(row).split(' ')[0].trim() == 'And') {
 													--row;
 												} else {
-													upperLine	= editor.session.getLine(row).split(' ')[0].trim();
+													upperLine	= editor.getSession().getLine(row).split(' ')[0].trim();
 													row			= 1;
 												}
 											}
@@ -533,7 +575,7 @@ Ext.onReady(function() {
 				if (typeof editor !== 'undefined') {
 					selectedEntry	= behatSyntax.getSelectionModel().getSelection()[0].data.code;
 					var pos			= editor.getCursorPosition();
-					var rowValue	= editor.session.getLine(pos.row);
+					var rowValue	= editor.getSession().getLine(pos.row);
 
 					if (rowValue.indexOf('And') == -1) {
 						var isAnd	= false;
@@ -822,6 +864,10 @@ Ext.onReady(function() {
 			if (! editor.selection.isEmpty()) {
 				clipboard	= editor.getCopyText();
 				editor.getSession().remove(editor.getSelection().getRange());
+			} else {
+				clipboard	= editor.getSession().getLine(editor.getCursorPosition().row).trim();
+				var line	= editor.getCursorPosition().row;
+				editor.getSession().getDocument().removeLines(line, line);
 			}
 		} //handler END
 	});
@@ -837,6 +883,8 @@ Ext.onReady(function() {
 		handler: function(view, record, item, index, e) {
 			if (! editor.selection.isEmpty()) {
 				clipboard	= editor.getCopyText();
+			} else {
+				clipboard	= editor.getSession().getLine(editor.getCursorPosition().row).trim();
 			}
 		} //handler END
 	});
@@ -912,7 +960,7 @@ Ext.onReady(function() {
 							useColors: behatSettings.useColors,
 							hidePaths: behatSettings.hidePaths,
 							content: editor.getSession().getValue(),
-							selected: editor.getSelection().isEmpty() ? null : editor.session.getTextRange(editor.getSelectionRange())
+							selected: editor.getSelection().isEmpty() ? null : editor.getSession().getTextRange(editor.getSelectionRange())
 						},
 						success: function(response) {
 							var answer	= response.responseText;
@@ -1233,7 +1281,6 @@ Ext.onReady(function() {
 		autoScroll: false,
 		height: 100,
 		width: 450,
-		defaultFocus: menu,
 		items:[{
 			xtype: 'grid',
 			id: 'autoCoGrid',
