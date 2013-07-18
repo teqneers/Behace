@@ -75,6 +75,7 @@ function procOpenBehat($cmd) {
  */
 switch ($_REQUEST['route']) {
 	case 'getSyntaxList':
+		$syntaxList	= null;
 		$shOutput	= null;
 		$output		= null;
 		$cmd		= './bin/behat -dl';
@@ -87,7 +88,8 @@ switch ($_REQUEST['route']) {
 			'(\w+)'			=> '%type',
 			'</comment>'	=> '',
 			'd{4}'			=> '%number',
-			'd{2}'			=> '%number'
+			'd{2}'			=> '%number',
+			'([\d.,]+)'		=> '%number'
 		);
 
 		//cleaning the shell output
@@ -110,9 +112,14 @@ switch ($_REQUEST['route']) {
 		exit;
 		break;
 	case 'getDirList':
-		$dirTree	= new RecursiveDirectoryIterator(PATHTOBEHAT."features", RecursiveDirectoryIterator::SKIP_DOTS);
-		$dir		= array();
+		$fileList = array();
+		try {
+			$dirTree	= new RecursiveDirectoryIterator(PATHTOBEHAT."features", RecursiveDirectoryIterator::SKIP_DOTS);
+		} catch (UnexpectedValueException $e) {
+			echo 'Error: '.$e->getMessage();
+		}
 
+		$dir	= array();
 		foreach ($dirTree as $path) {
 			//gets the files in the current directory
 			foreach (new DirectoryIterator($path) as $file) {
@@ -144,7 +151,11 @@ switch ($_REQUEST['route']) {
 		$name		= $_REQUEST['name'];
 		$filePath	= getFilePath($id);
 		// output file directly
-		readfile($filePath.'/'.$name);
+		if (is_readable($filePath.'/'.$name)) {
+			readfile($filePath.'/'.$name);
+		} else {
+			echo 'File could not be loaded. Please make sure path is readable.';
+		}
 		exit;
 		break;
 	case 'saveFile':
@@ -154,13 +165,15 @@ switch ($_REQUEST['route']) {
 		//creates an array for finding the path to the file to be saved
 		$filePath	= getFilePath($id);
 
-		if ($handle	= fopen($filePath.'/'.$open, 'w')) {
+		if (is_writable($filePath.'/'.$open)) {
+			$handle	= fopen($filePath.'/'.$open, 'w');
 			fwrite($handle, $content);
 			fclose($handle);
 			echo 'File saved successfully!';
 		} else {
-			echo 'File could not be saved!';
+			echo 'File could not be saved. Please make sure path is writable.';
 		}
+
 		exit;
 		break;
 	case 'createFolder':
@@ -168,12 +181,13 @@ switch ($_REQUEST['route']) {
 		$folderName	= trim(htmlspecialchars(strtolower($_REQUEST['folderName'])));
 		$folderName	= str_replace(array('..', '/'), '', $folderName);
 
-		//try creating the folder with 0766
+		//try creating the folder with 0777
 		if (! file_exists(PATHTOBEHAT.'features/'.$folderName)) {
-			if (mkdir(PATHTOBEHAT.'features/'.$folderName, 0766)) {
+			try {
+				mkdir(PATHTOBEHAT.'features/'.$folderName, 0777);
 				echo 'Folder '.$folderName.' created.';
-			} else {
-				echo 'Folder could not be created.';
+			} catch(ErrorException $e) {
+				echo 'Error: '.$e->getMessage();
 			}
 		} else {
 			echo 'Folder "'.$folderName.'" already exists!';
@@ -187,46 +201,48 @@ switch ($_REQUEST['route']) {
 		$fileName	= str_replace(array('..', '/'), '', $fileName);
 		//try creating the file with full rights for reading, writing and opening
 		if (! file_exists(PATHTOBEHAT.'features/'.$folderName.'/'.$fileName.'.feature')) {
-			$handler = fopen(
-				PATHTOBEHAT.'features/'.$folderName.'/'.$fileName.'.feature',
-				'w'
-			) or die('File could not be created.');
+			try {
+				$handler = fopen(
+					PATHTOBEHAT.'features/'.$folderName.'/'.$fileName.'.feature',
+					'w'
+				);
+				if (! $handler) {
+					throw new Exception('Error: File could not be created. Please make sure path is writable.');
+				}
+			} catch(Exception $e) {
+				echo 'Error: '.$e->getMessage();
+				exit;
+			}
 			fwrite(
 				$handler,
 				"Feature: featuretext\n\tFeature description\n\nScenario: short scenario-description\n\tGiven \n\tWhen \n\tThen "
 			);
-			echo 'file '.$fileName.' created.';
+			// return the sha1 of the filepath for expanding the tree to the created File
+			echo sha1(PATHTOBEHAT.'features/'.$folderName.'/'.$fileName.'.feature');
 			fclose($handler);
 		} else {
-			echo 'File "'.$fileName.'" in folder "'.$folderName.'" already exists!';
+			echo 'Error: File could not be created. File already exists.';
 		}
 		exit;
 		break;
 	case 'runTest':
-		// runs the selected test-> writes it in a new file with a @tempTest tag!
-		$file			= PATHTOBEHAT.'features/tmp/tempTest.feature';
-		$selectedText	= isset($_REQUEST['selected']) ? $_REQUEST['selected'] : null;
+		$selectionOnly	= isset($_REQUEST['selectionOnly']) ? true : false;
+		$selectedText	= isset($_REQUEST['selected']) ? str_replace(array('..', '/'), '', $_REQUEST['selected']) : null;
+		if ($selectionOnly && $selectedText == null) {
+			echo 'No scenario selected.';
+			exit;
+		}
+
 		// little security
 		if ($_REQUEST['outputFormat'] == 'pretty' || $_REQUEST['outputFormat'] == 'progress') {
 			$outputFormat	= $_REQUEST['outputFormat'];
 		} else {
-			$outputFormat	= 'pretty';
+			echo 'no';
 			exit;
 		}
-		if ($_REQUEST['useColors'] == 'true' || $_REQUEST['useColors'] == 'false') {
-			$useColors	= $_REQUEST['useColors'];
-		} else {
-			$useColors	= true;
-				exit;
-		}
-		if ($_REQUEST['hidePaths'] == 'true' || $_REQUEST['hidePaths'] == 'false') {
-			$hidePaths	= $_REQUEST['hidePaths'];
-		} else {
-			$hidePaths	= true;
-			exit;
-		}
-		$content		= $_REQUEST['content'];
-		$newContext		= null;
+		$testName	= trim(explode(":", explode("\n", $_REQUEST['content'])[0])[1]);
+		$newContext	= null;
+
 		// added colors for finding failed scenarios easier
 		$colorLibrary	= array(
 			'[31m'		=> '<span style="color:red">',
@@ -240,30 +256,19 @@ switch ($_REQUEST['route']) {
 			'[0m'		=> '</span>'
 		);
 
-		if (! empty($content)) {
-			// open the handle
-			$handle	= fopen($file, 'wb');
-			// check if a text was selected, to differ from running the complete test and only a part of it
-			if (! isset($selectedText)) {
-				fwrite($handle, '@tempTest'."\n".$content);
-			} else {
-				$newContext	= explode('Scenario:', $content);
-				$newContext	= $newContext[0];
-				$newContext	.= "\n".$selectedText;
-				fwrite($handle, '@tempTest'."\n".$newContext);
+		if (! empty($testName)) {
+			if (isset($selectedText)) {
+				// gets text after the 'Scenario:' tag
+				$testName	= trim(explode(":", explode("\n", $selectedText)[0])[1]);
 			}
-			fclose($handle);
-
-			$colorsFlag	= $useColors == 'true' ? '--ansi' : '';
-			$pathsFlag	= $hidePaths == 'true' ? '--no-paths' : '';
+			$colorsFlag	= $_REQUEST['useColors'] == 'true' ? '--ansi' : '';
+			$pathsFlag	= $_REQUEST['hidePaths'] == 'true' ? '--no-paths' : '';
 			// run selected behat test in command line
-			$cmd	= "./bin/behat ".$pathsFlag." ".$colorsFlag." --format ".$outputFormat." --tags '@tempTest'";
+			$cmd	= "./bin/behat ".$pathsFlag." ".$colorsFlag." --format ".$outputFormat." --name '".$testName."'";
 			echo str_replace(array_keys($colorLibrary), $colorLibrary, implode(procOpenBehat($cmd)));
-			unlink($file);
 		} else {
 			echo 'no Test selected!';
 		}
-
 		exit;
 		break;
 	case 'deleteContent':
@@ -273,13 +278,15 @@ switch ($_REQUEST['route']) {
 
 		if ($isFile) {
 			$filePath	= getFilePath($id);
-			if (unlink($filePath.'/'.$fileName)) {
+			if (is_writable($filePath.'/'.$fileName)) {
+				unlink($filePath.'/'.$fileName);
 				echo 'deleted';
 			} else {
-				echo 'File could not be deleted!';
+				echo 'File could not be deleted. Please make sure path is writable.';
 			}
 		} else {
-			if (rmdir(PATHTOBEHAT.'features/'.$fileName)) {
+			if (is_writable(PATHTOBEHAT.'features/'.$fileName) && count(scandir(PATHTOBEHAT.'features/'.$fileName)) == 2) {
+				rmdir(PATHTOBEHAT.'features/'.$fileName);
 				echo 'deleted';
 			} else {
 				echo 'Folder could not be deleted! Maybe not empty?';

@@ -5,7 +5,8 @@ Ext.Loader.setPath('Ext.ux', '.');
 Ext.require([
 	'Ext.ux.TreeFilter',
 	'Ext.tip.QuickTipManager'
-])
+]);
+var UndoManager = require("ace/undomanager").UndoManager;
 
 //####################################
 // INITS
@@ -31,8 +32,8 @@ var editorBib	= [];
 editorBib[0]	= {};
 editorBib[1]	= {};
 
+// create the tree filter
 var treeFilter	= Ext.create('Ext.ux.TreeFilter');
-var UndoManager = require("ace/undomanager").UndoManager;
 
 // init the tooltips
 Ext.QuickTips.init();
@@ -43,10 +44,23 @@ var clipboard	= null;
 //###############################
 // STORES
 //###############################
+// store for the folder structure (west)
 var store	= Ext.create('Ext.data.TreeStore', {
 	proxy: {
 		type: 'ajax',
-		url: 'ajax_behat.php?route=getDirList'
+		url: 'ajax_behat.php?route=getDirList',
+		listeners: {
+			exception: function(proxy, response, operation) {
+				if (operation.exception && operation.action == "read") {
+					Ext.MessageBox.show({
+						title: 'Error',
+						msg: 'Can not read feature folder. Please check permissions.',
+						buttons: Ext.MessageBox.OK,
+						icon: Ext.MessageBox.WARNING
+					});
+				}
+			}
+		}
 	},
 	folderSort: true,
 	autoLoad: true,
@@ -56,6 +70,7 @@ var store	= Ext.create('Ext.data.TreeStore', {
 	}]
 });
 
+// store for the syntax list (east)
 var wordStore	= Ext.create('Ext.data.Store', {
 	storeId: 'behatSyntaxStore',
 	fields: ['code', 'group'],
@@ -72,6 +87,7 @@ var wordStore	= Ext.create('Ext.data.Store', {
 	groupers:[{ property: 'group', direction: 'ASC' }]
 });
 
+// a syntax store for the autoocomplete feature
 var autoCoStore	= Ext.create('Ext.data.Store', {
 	storeId: 'behatSyntaxStore',
 	fields: ['code'],
@@ -91,8 +107,14 @@ var autoCoStore	= Ext.create('Ext.data.Store', {
 	}]
 });
 
+// store for the regex selection
+var regExStore	= Ext.create('Ext.data.Store', {
+	id: 'regExStore',
+	fields: ['option'],
+	data: null
+});
 
-// available themes
+// store for all available themes
 var themeList = Ext.create('Ext.data.Store', {
 	fields: ['name', 'theme'],
 	data : [
@@ -108,7 +130,7 @@ var themeList = Ext.create('Ext.data.Store', {
 	]
 });
 
-// available behat output formats
+// store for available behat output formats
 var behatOutputList = Ext.create('Ext.data.Store', {
 	fields: ['name', 'output'],
 	data : [
@@ -117,33 +139,338 @@ var behatOutputList = Ext.create('Ext.data.Store', {
 	]
 });
 
+//###########################################################
+// THE REGEX SELECT WINDOW
+//###########################################################
+var regExWindow	= Ext.create('Ext.window.Window', {
+	id: 'regExWindow',
+	layout: 'card',
+	border: false,
+	closable: false,
+	draggable: false,
+	resizable: false,
+	autoScroll: false,
+	height: 50,
+	width: 150,
+	items:[{
+		xtype: 'grid',
+		id: 'regExGrid',
+		border: false,
+		hideHeaders: true,
+		forceFit: true,
+		columns: [{
+			header: 'option',
+			dataIndex: 'option'
+		}],
+		listeners: {
+			itemclick: function(view, node) {
+				editor.find('(', {
+					backwards: true
+				});
+				editor.find(needlePos[searchPos], {
+					backwards: false,
+					skipCurrent: false,
+					range: editor.getSelection().getLineRange()
+				});
+				editor.replace(Ext.getCmp('regExGrid').getSelectionModel().getSelection()[0].data.option);
+				regExWindow.hide();
+				regExStore.removeAll();
+
+				// simulate a tab press
+				goToNextVariable();
+			}
+		},
+		store: regExStore
+	}]
+});
+
+
+//###########################################################
+// THE AUTOCOMPLETE WINDOW
+//###########################################################
+var autoCoWindow	= Ext.create('Ext.window.Window', {
+	id: 'autoComplete',
+	layout: 'card',
+	border: false,
+	closable: false,
+	draggable: false,
+	resizable: false,
+	autoScroll: false,
+	height: 100,
+	width: 450,
+	items:[{
+		xtype: 'grid',
+		id: 'autoCoGrid',
+		border: false,
+		hideHeaders: true,
+		forceFit: true,
+		columns: [{
+			header: 'code',
+			dataIndex: 'code'
+		}],
+		store: autoCoStore,
+		listeners: {
+			itemclick: function(obj, record, item, index, e) {
+				insertSelectedSentence(e);
+				addCommand();
+			}
+		}
+	}]
+});
+
 //####################################
 // FUNCTIONS
 //####################################
-/*
+/**
  * filters the associated line for %value, %type or %number and saves it in an array. Thereafter starts searching the first occurrence
  */
-function searchNeedle() {
+function searchNeedle(line) {
 	editorFocus();
-	var pos				= editor.selection.getCursor();
-	rowValue			= editor.getSession().getLine(pos.row);
+	var pos				= editor.getSelection().getCursor();
+	var counter			= 0;
+	var rowValue		= (line == null) ? editor.getSession().getLine(pos.row) : line;
+	var expression		= getTextInBrackets(rowValue);
+	for (var j = 0; j < expression.length; j++) {
+		expression[j]	= '('+expression[j]+')';
+	}
 	window.searchPos	= 0;
 	window.needlePos	= rowValue.split(' ');
 	window.isSearch		= true;
 
+	// run through the splitted line array and search for 'variables'
 	for (var k = needlePos.length-1; k >= 0; k--) {
-		if (needlePos[k].match(/%/) == null) {
+		if (needlePos[k].match(/%/) == null && needlePos[k].match(/\|/) == null) {
 			needlePos.splice(k, 1);
-		} else {
-			needlePos[k]	= needlePos[k].replace(/"/g, '');
+		} else if (needlePos[k].match(/%/) != null) {
+			needlePos[k]	= needlePos[k].replace(/"|:/g, '');
+		} else if (needlePos[k].match(/\|/) != null) {
+			needlePos[k]	= expression[counter];
+			counter++;
 		}
 	}
 	if (needlePos.length !== 0) {
 		editor.commands.removeCommand('indent');
 		editor.commands.removeCommand('outdent');
-		editor.find(needlePos[searchPos]);
+		editor.navigateLineStart();
+		editor.find(needlePos[searchPos], {
+			backwards: false,
+			range: editor.getSelection().getLineRange()
+		});
+		if (needlePos[searchPos].match(/\|/) != null) {
+			triggerRegExSelector();
+		}
 	}
 }
+
+/**
+ * Get the string between the brackets
+ */
+function getTextInBrackets(string) {
+	var result	= [];
+	var regEx	= /\(([^\)]+)\)/g;
+	var text;
+
+	while(text = regEx.exec(string)) {
+		result.push(text[1]);
+	}
+	return result.reverse();
+}
+
+/**
+ * Builds a dropdown for regex variables, for easier use
+ */
+function addSelectionToStore(line) {
+	if (line.match(/\|/) != null) {
+		var regExCount	= (line.split('(').length) - 2;
+		var expression	= getTextInBrackets(line);
+		var options		= expression[regExCount].split('|');
+		var result		= [];
+
+		for (var k = 0; k < options.length; k++) {
+			result.push({'option': options[k]});
+		}
+		regExStore.removeAll();
+
+		if (result.length == 0 || result.length == 1) {
+			return false;
+		} else {
+			regExStore.add(result);
+			return true;
+		}
+	} else {
+		return false;
+	}
+}
+
+/**
+ * Triggers the RegEx Selector
+ */
+function triggerRegExSelector() {
+	//deactivating commands 'up' and 'down'
+	editor.commands.removeCommand('golinedown');
+	editor.commands.removeCommand('golineup');
+
+	var position	= editor.getCursorPosition();
+	var dispPos		= editor.renderer.textToScreenCoordinates(position.row, position.column);
+	var notEmpty	= addSelectionToStore(needlePos[searchPos]);
+
+	if (notEmpty) {
+		if ((window.screen.height - dispPos.pageY) < 250) {
+			regExWindow.showAt(dispPos.pageX-20, dispPos.pageY-100);
+		} else {
+			regExWindow.showAt(dispPos.pageX-20, dispPos.pageY+20);
+		}
+		editor.focus();
+	} else {
+		cleanUp();
+	}
+}
+
+function triggerRegExSelectorOnClick() {
+	editor.find('(', {backwards: true, range: editor.getSelection().getLineRange()});
+	var start	= editor.getSelection().getCursor();
+	editor.jumpToMatching();
+	var end		= editor.getSelection().getCursor();
+	var Range 	= require('ace/range').Range;
+	var range	= new Range(start.row, start.column-1, end.row, end.column+1);
+	var line	= editor.getSession().getTextRange(range);
+	searchNeedle(line);
+}
+
+/**
+ * gets the user to the next (available) variable
+ */
+function goToNextVariable() {
+	++searchPos;
+	if (searchPos < needlePos.length && typeof(needlePos[searchPos]) !== 'undefined') {
+		editor.find(needlePos[searchPos], {
+			backwards: false
+		});
+		if (needlePos[searchPos].match(/\|/) != null) {
+			triggerRegExSelector();
+		}
+	}
+	if (searchPos == needlePos.length || searchPos > needlePos.length) {
+		editor.navigateLineEnd();
+		cleanUp();
+	}
+	editor.focus();
+}
+
+/**
+ * Clean and reset
+ */
+function cleanUp() {
+	Ext.getCmp('autoCoGrid').getSelectionModel().clearSelections();
+	Ext.getCmp('regExGrid').getSelectionModel().clearSelections();
+	window.needlePos	= null;
+	window.searchPos	= null;
+	autoCoWindow.hide();
+	regExWindow.hide();
+	autoCoStore.clearFilter();
+	regExStore.removeAll();
+	editor.focus();
+	addCommand();
+	addTabCommand();
+}
+
+/**
+ * Inserts the selected Sentence in the editor
+ */
+function insertSelectedSentence(e) {
+	var selectedEntry	= Ext.getCmp('autoCoGrid').getSelectionModel().getSelection()[0].data.code;
+	// true if last Char is a Space
+	var lastCharIsSpace	= !!((window.rowValue.charAt(window.rowValue.length - 1) == ' '));
+	var rowValue		= window.rowValue.trim();
+	if (isAnd) {
+		selectedEntry	= selectedEntry.substr(selectedEntry.indexOf(" ") + 1);
+	}
+	selectedEntry	= lastCharIsSpace ? selectedEntry.substr(rowValue.length+1) : selectedEntry.substr(rowValue.length);
+	// prevent enter button to insert new line
+	e.preventDefault();
+	editor.insert(selectedEntry);
+	searchNeedle(null);
+	// hide autocomplete, reset filter
+	autoCoWindow.hide();
+	autoCoStore.clearFilter();
+	Ext.getCmp('autoCoGrid').getSelectionModel().clearSelections();
+}
+
+/**
+ * Marks a whole line when clicking on 'Scenario:' for easier selective testing!
+ */
+function selectScenario() {
+	var position	= editor.getCursorPosition();
+	if (editor.getSession().getTokenAt(position.row, position.column) != null) {
+		if (editor.getSession().getTokenAt(position.row, position.column).value == 'Scenario:') {
+			editor.getSelection().selectLine();
+		}
+	}
+}
+
+/**
+ * Triggers the autocomplete window and filters the syntax
+ */
+function triggerAutocomplete(e) {
+	var pos		= editor.getCursorPosition();
+	var dispPos	= editor.renderer.textToScreenCoordinates(pos.row, pos.column);
+
+	//show the autocomplete
+	window.rowValue	= editor.getSession().getLine(pos.row);
+	rowValue.trim();
+
+	//activation after 4 chars
+	if (rowValue.length > 4 && regExWindow.isHidden()) {
+		autoCoStore.clearFilter();
+
+		if (rowValue.indexOf('And') == -1) {
+			window.isAnd	= false;
+			var typed		= rowValue.trim();
+			//if and is written, filter autocomplete by first word one line up
+		} else if (rowValue.indexOf('And') <= 4) {
+			var row			= editor.getCursorPosition().row;
+			window.isAnd	= true;
+			rowValue		= rowValue.replace('And', '');
+
+			//run up the lines until the editor finds when, then or given!
+			while (row != 1) {
+				if (editor.getSession().getLine(row).split(' ')[0].trim() == 'And') {
+					--row;
+				} else {
+					upperLine	= editor.getSession().getLine(row).split(' ')[0].trim();
+					row			= 1;
+				}
+			}
+			var typed	= upperLine+' '+rowValue.trim();
+		}
+
+		autoCoStore.filter('code', typed);
+		autoCoWindow.doLayout();
+
+		if (autoCoStore.getCount() !== 0 && e.data.text !== "\n" && rowValue.length <= 20 && rowValue.indexOf('|') == -1) {
+			//positioning the autocomplete window depending on cursor pos
+			if ((window.screen.height - dispPos.pageY) < 250) {
+				autoCoWindow.showAt(dispPos.pageX-20, dispPos.pageY-100);
+			} else {
+				autoCoWindow.showAt(dispPos.pageX-20, dispPos.pageY+20);
+			}
+			Ext.getCmp('autoCoGrid').getSelectionModel().select(0);
+			editor.focus();
+			//deactivating commands 'up' and 'down' for 'safety'
+			editor.commands.removeCommand('golinedown');
+			editor.commands.removeCommand('golineup');
+		} else {
+			autoCoWindow.hide();
+			autoCoStore.clearFilter();
+			addCommand();
+		}
+	} else {
+		autoCoWindow.hide();
+		autoCoStore.clearFilter();
+		addCommand();
+	}
+}
+
 
 /*
  * focuses the editor, clears the syntax panel on the right and collapses it
@@ -282,6 +609,7 @@ function enableButtons() {
 //####################################
 Ext.onReady(function() {
 
+	// init the different masks
 	var testMask	= new Ext.LoadMask(Ext.getBody(), {msg: "running Test..."});
 	var loadMask	= new Ext.LoadMask(Ext.getBody(), {msg: "loading..."});
 	var saveMask	= new Ext.LoadMask(Ext.getBody(), {msg: "saving..."});
@@ -337,20 +665,20 @@ Ext.onReady(function() {
 			itemclick: function(view, node) {
 				//open nodes with a single click
 				if (node.isLeaf()) {
-					Ext.getCmp('deleteButton').enable();
-					Ext.getCmp('newFileButton').disable();
+					deleteButton.enable();
+					newFileButton.disable();
 				} else if (node.isExpanded()) {
 					node.collapse();
-					Ext.getCmp('deleteButton').enable();
-					Ext.getCmp('newFileButton').enable();
+					deleteButton.enable();
+					newFileButton.enable();
 				} else {
 					node.expand();
-					Ext.getCmp('deleteButton').enable();
-					Ext.getCmp('newFileButton').enable();
+					deleteButton.enable();
+					newFileButton.enable();
 				}
 			},
 			itemdblclick: {
-				fn: function(view, record, item, index, e) {
+				fn: function(view, record) {
 					var isOpen		= false;
 					window.id		= record.get('id');
 					window.title	= record.get('text');
@@ -374,24 +702,27 @@ Ext.onReady(function() {
 								name: title
 							},
 							success: function(response) {
-								var tab	= tabPanel.add({
+								var tooltip	= response.responseText.split("\n\n");
+								tooltip		= tooltip[0].split("\n")[1];
+								var tab		= tabPanel.add({
 									title: title,
 									closable: true,
 									active: true,
+									tooltip: tooltip,
 									listeners: {
-										afterrender:function() {
+										afterrender: function() {
 											editorFactory(this.id, id);
 											editor	= getEditor(this.id);
 										},
 										beforeclose: function(tab) {
-											// check if any changes were made to the file and ask user for
+											// check if any changes were made to the file and ask user for handling
 											if (! editor.getSession().getUndoManager().isClean()) {
 												Ext.MessageBox.show({
 													title: 'Status',
 													msg: 'File changed! <br />Would you like to save your changes?',
 													buttons: Ext.MessageBox.YESNOCANCEL,
 													fn: function onCloseTab(btn) {
-														var tab	= Ext.getCmp('tabPanel').getActiveTab();
+														var tab	= tabPanel.getActiveTab();
 														switch(btn) {
 															case 'no':
 																destroyEditor(tab.id);
@@ -446,7 +777,7 @@ Ext.onReady(function() {
 											return false;
 										}
 									}
-								})
+								});
 								tabPanel.setActiveTab(tab);
 								var text	= response.responseText;
 								editor.getSession().setValue(text);
@@ -454,70 +785,14 @@ Ext.onReady(function() {
 								editor.focus();
 								editor.navigateFileEnd();
 
-								//###############################################
-								//autocomplete feature
-								//###############################################
+								// trigger autocomplete
 								editor.on('change', function(e) {
-									var pos		= editor.getCursorPosition();
-									var dispPos	= editor.renderer.textToScreenCoordinates(pos.row, pos.column);
-
-									//show the autocomplete
-									window.rowValue	= editor.getSession().getLine(pos.row);
-									rowValue.trim();
-
-									//activation after 4 chars
-									if (rowValue.length > 4) {
-										autoCoStore.clearFilter();
-										tabPanel.doLayout();
-
-										if (rowValue.indexOf('And') == -1) {
-											window.isAnd	= false;
-											var regExp		= new RegExp(rowValue.trim());
-										//if and is written, filter autocomplete by first word one line up
-										} else if (rowValue.indexOf('And') <= 4) {
-											var row			= editor.getCursorPosition().row;
-											window.isAnd	= true;
-											rowValue		= rowValue.replace('And', '');
-
-											//run up the lines until the editor finds when, then or given!
-											while (row != 1) {
-												if (editor.getSession().getLine(row).split(' ')[0].trim() == 'And') {
-													--row;
-												} else {
-													upperLine	= editor.getSession().getLine(row).split(' ')[0].trim();
-													row			= 1;
-												}
-											}
-											var regExp	= new RegExp(upperLine+' '+rowValue.trim());
-										}
-
-										autoCoStore.filter('code', regExp);
-										autoCoWindow.doLayout();
-
-										if (autoCoStore.getCount() !== 0 && e.data.text !== "\n" && rowValue.length <= 20 && rowValue.indexOf('|') == -1) {
-											//positioning the autocomplete window depending on cursor pos
-											if ((window.screen.height - dispPos.pageY) < 250) {
-												autoCoWindow.showAt(dispPos.pageX-20, dispPos.pageY-100);
-											} else {
-												autoCoWindow.showAt(dispPos.pageX-20, dispPos.pageY+20);
-											}
-
-											Ext.getCmp('autoCoGrid').getSelectionModel().select(0);
-											editor.focus();
-											//deactivating commands 'up' and 'down' for 'safety'
-											editor.commands.removeCommand('golinedown');
-											editor.commands.removeCommand('golineup');
-										} else {
-											autoCoWindow.hide();
-											autoCoStore.clearFilter();
-											addCommand();
-										}
-									} else {
-										autoCoWindow.hide();
-										autoCoStore.clearFilter();
-										addCommand();
-									}
-								});//editor on / autocomplete END
+									triggerAutocomplete(e);
+								});
+								//the scenario selection event
+								editor.on('click',selectScenario);
+								//trigger the regex option
+								editor.on('dblclick',triggerRegExSelectorOnClick);
 							}//success END
 						})
 					}//if isOpen else END
@@ -547,7 +822,7 @@ Ext.onReady(function() {
 				autoCoWindow.hide();
 			}
 		}
-	})
+	});
 
 	//###########################################################
 	// east Region --> behat syntax panel
@@ -588,7 +863,7 @@ Ext.onReady(function() {
 					}
 					editor.insert(selectedEntry);
 					autoCoWindow.hide();
-					searchNeedle();
+					searchNeedle(null);
 				}
 			}
 		},
@@ -646,7 +921,12 @@ Ext.onReady(function() {
 						success: function(response) {
 							var answer	= response.responseText;
 							if (answer !== 'Folder '+text+' created.') {
-								Ext.MessageBox.alert('Status', answer);
+								Ext.MessageBox.show({
+									title: 'Status',
+									msg: answer,
+									buttons: Ext.MessageBox.OK,
+									icon: Ext.MessageBox.WARNING
+								});
 							}
 							store.load();
 						}
@@ -668,7 +948,7 @@ Ext.onReady(function() {
 			if (tree.getSelectionModel().hasSelection() && !selectedNode[0].isLeaf()) {
 				Ext.MessageBox.prompt('Create File', 'please enter file name:', function(btn, fileName) {
 					var selectedFolder	= selectedNode[0];
-					var folder			= tree.getSelectionModel().getSelection()[0].getId();
+					var path			= store.getNodeById(selectedNode[0].getId()).getPath();
 					if (btn == 'ok') {
 						Ext.Ajax.request({
 							url: 'ajax_behat.php',
@@ -679,17 +959,30 @@ Ext.onReady(function() {
 								folder: selectedFolder.data.text
 							},
 							success: function(response) {
-								if (response.responseText !== 'file '+fileName+' created.') {
-									Ext.MessageBox.alert('Status', response.responseText);
+								if (response.responseText.match(/Error/) != null) {
+									Ext.MessageBox.show({
+										title: 'Error',
+										msg: response.responseText,
+										buttons: Ext.MessageBox.OK,
+										icon: Ext.MessageBox.WARNING
+									});
 								}
-								store.load();
-								tree.expandPath(folder);
+								tree.getStore().load();
+								tree.on('load', function() {
+									tree.expandPath(path);
+								});
+								tree.selectPath(path+'/'+response.responseText);
 							}
 						})
 					} // end If btn == ok
 				}) // end Ext.MessageBox.prompt
 			} else {
-				Ext.MessageBox.alert('Status', 'Please select a folder');
+				Ext.MessageBox.show({
+					title: 'Status',
+					msg: 'Please select a folder!',
+					buttons: Ext.MessageBox.OK,
+					icon: Ext.MessageBox.INFO
+				});
 			}
 		}
 	});
@@ -740,7 +1033,12 @@ Ext.onReady(function() {
 											disableButtons();
 										}
 									} else {
-										Ext.MessageBox.alert('Status', answer);
+										Ext.MessageBox.show({
+											title: 'Status',
+											msg: answer,
+											buttons: Ext.MessageBox.OK,
+											icon: Ext.MessageBox.WARNING
+										});
 									}
 								}
 							})//ajax end
@@ -779,15 +1077,14 @@ Ext.onReady(function() {
 				success: function(response) {
 					var answer	= response.responseText;
 					if (answer !== 'File saved successfully!') {
-						Ext.create('Ext.window.Window', {
+						Ext.MessageBox.show({
 							title: 'Status',
-							autoScroll: true,
-							height: 250,
-							width: 600,
-							layout: 'fit',
-							html: '<pre>'+answer+'</pre>'
-						}).show();
+							msg: answer,
+							buttons: Ext.MessageBox.OK,
+							icon: Ext.MessageBox.WARNING
+						});
 					}
+					editor.getSession().getUndoManager().reset();
 					saveMask.hide();
 					editorFocus();
 					tabPanel.doLayout();
@@ -804,7 +1101,7 @@ Ext.onReady(function() {
 		icon: 'icons/arrow_refresh.png',
 		disabled: true,
 		clickEvent: 'mousedown',
-		handler: function(view, record, item, index, e) {
+		handler: function() {
 			loadMask.show();
 			Ext.Ajax.request ({
 				url: 'ajax_behat.php',
@@ -834,7 +1131,7 @@ Ext.onReady(function() {
 		icon: 'icons/arrow_undo.png',
 		disabled: true,
 		clickEvent: 'mousedown',
-		handler: function(view, record, item, index, e) {
+		handler: function() {
 			editor.getSession().getUndoManager().undo(true);
 		} //handler END
 	});
@@ -847,7 +1144,7 @@ Ext.onReady(function() {
 		icon: 'icons/arrow_redo.png',
 		disabled: true,
 		clickEvent: 'mousedown',
-		handler: function(view, record, item, index, e) {
+		handler: function() {
 			editor.getSession().getUndoManager().redo(true);
 		} //handler END
 	});
@@ -860,8 +1157,8 @@ Ext.onReady(function() {
 		icon: 'icons/cut.png',
 		disabled: true,
 		clickEvent: 'mousedown',
-		handler: function(view, record, item, index, e) {
-			if (! editor.selection.isEmpty()) {
+		handler: function() {
+			if (! editor.getSelection().isEmpty()) {
 				clipboard	= editor.getCopyText();
 				editor.getSession().remove(editor.getSelection().getRange());
 			} else {
@@ -880,8 +1177,8 @@ Ext.onReady(function() {
 		icon: 'icons/copy.png',
 		disabled: true,
 		clickEvent: 'mousedown',
-		handler: function(view, record, item, index, e) {
-			if (! editor.selection.isEmpty()) {
+		handler: function() {
+			if (! editor.getSelection().isEmpty()) {
 				clipboard	= editor.getCopyText();
 			} else {
 				clipboard	= editor.getSession().getLine(editor.getCursorPosition().row).trim();
@@ -897,7 +1194,7 @@ Ext.onReady(function() {
 		icon: 'icons/paste.png',
 		disabled: true,
 		clickEvent: 'mousedown',
-		handler: function(view, record, item, index, e) {
+		handler: function() {
 			if (clipboard !== null) {
 				editor.insert(clipboard, true);
 			}
@@ -945,7 +1242,7 @@ Ext.onReady(function() {
 		menu: {
 			items: [{
 				text: '...selection only',
-				tooltip: '<b>selection only</b><br />Mark a complete scenario and press this option',
+				tooltip: '<b>selection only</b><br />Click on a "Scenario:" to mark the line and then click here.',
 				id: 'runTestSelected',
 				icon: 'icons/control_play_blue.png',
 				disabled: true,
@@ -960,7 +1257,8 @@ Ext.onReady(function() {
 							useColors: behatSettings.useColors,
 							hidePaths: behatSettings.hidePaths,
 							content: editor.getSession().getValue(),
-							selected: editor.getSelection().isEmpty() ? null : editor.getSession().getTextRange(editor.getSelectionRange())
+							selected: editor.getSelection().isEmpty() ? null : editor.getSession().getTextRange(editor.getSelectionRange()),
+							selectionOnly: true
 						},
 						success: function(response) {
 							var answer	= response.responseText;
@@ -990,7 +1288,7 @@ Ext.onReady(function() {
 		tooltip: '<b>Settings</b>',
 		icon: 'icons/wrench.png',
 		clickEvent: 'mousedown',
-		handler: function(view, record, item, index, e) {
+		handler: function() {
 			settingsWindow.show();
 		} //handler END
 	});
@@ -1019,7 +1317,7 @@ Ext.onReady(function() {
 	// the textfield for searching in the open file
 	var searchText	= Ext.create('Ext.form.field.Text', {
 		id: 'searchText',
-		tooltip: '<b>searches the open tab for entered value</b>',
+		tooltip: '<b>search through open feature file</b>',
 		emptyText: 'search...',
 		disabled: true,
 		hideLabel: true,
@@ -1071,7 +1369,7 @@ Ext.onReady(function() {
 			"->",
 			searchText
 		]
-	})
+	});
 
 	//###########################################################
 	// THE SETTINGS WINDOW
@@ -1109,7 +1407,7 @@ Ext.onReady(function() {
 						displayField: 'theme',
 						listeners: {
 							'select': function(field, data) {
-								value	= data[0].data.name;
+								var value	= data[0].data.name;
 								editorSettings.theme	= value;
 								if (typeof(editor) !== 'undefined') {
 									editor.setTheme("ace/theme/"+value);
@@ -1229,8 +1527,7 @@ Ext.onReady(function() {
 						displayField: 'output',
 						listeners: {
 							'select': function(field, data) {
-								value	= data[0].data.name;
-								behatSettings.output	= value;
+								behatSettings.output	= data[0].data.name;
 							}
 						}
 					}, {
@@ -1250,7 +1547,6 @@ Ext.onReady(function() {
 						checked : behatSettings.hidePaths,
 						listeners: {
 							change: function(field, value) {
-								var colorStatus	= Ext.getCmp('hidePaths').getValue();
 								behatSettings.hidePaths	= value;
 							}
 						}
@@ -1266,33 +1562,6 @@ Ext.onReady(function() {
 	// selecting a default value for the behat output format
 	behatOutputList.on('load',function(store) {
 		Ext.getCmp('behatOutputListComboBox').setValue(store.getAt('0').get('name'));
-	});
-
-	//###########################################################
-	// THE AUTOCOMPLETE WINDOW
-	//###########################################################
-	var autoCoWindow	= Ext.create('Ext.window.Window', {
-		id: 'autoComplete',
-		layout: 'card',
-		border: false,
-		closable: false,
-		draggable: false,
-		resizable: false,
-		autoScroll: false,
-		height: 100,
-		width: 450,
-		items:[{
-			xtype: 'grid',
-			id: 'autoCoGrid',
-			border: false,
-			hideHeaders: true,
-			forceFit: true,
-			columns: [{
-				header: 'code',
-				dataIndex: 'code'
-			}],
-			store: autoCoStore
-		}]
 	});
 
 	//###########################################################
@@ -1322,94 +1591,82 @@ Ext.onReady(function() {
 		key: Ext.EventObject.ENTER,
 		fn: function(key, e) {
 			if (Ext.getCmp('autoCoGrid').getSelectionModel().hasSelection()) {
-				selectedEntry	= Ext.getCmp('autoCoGrid').getSelectionModel().getSelection()[0].data.code;
-				rowValue		= rowValue.trim();
-
-				if (! isAnd) {
-					selectedEntry	= selectedEntry.substr(rowValue.length);
-				} else {
-					selectedEntry	= selectedEntry.substr(selectedEntry.indexOf(" ") + 1);
-					selectedEntry	= selectedEntry.substr(rowValue.length);
-				}
-				// prevent enter button to insert new line
+				insertSelectedSentence(e);
+			}
+			if (Ext.getCmp('regExGrid').getSelectionModel().hasSelection()) {
 				e.preventDefault();
-				editor.insert(selectedEntry);
-				searchNeedle();
-				// hide autocomplete, reset filter
-				autoCoWindow.hide();
-				autoCoStore.clearFilter();
-				Ext.getCmp('autoCoGrid').getSelectionModel().clearSelections();
-				addCommand();
+				editor.find(needlePos[searchPos], {
+					backwards: false,
+					skipCurrent: false,
+					range: editor.getSelection().getLineRange()
+				});
+				editor.replace(Ext.getCmp('regExGrid').getSelectionModel().getSelection()[0].data.option);
+				regExWindow.hide();
+				regExStore.removeAll();
+				editor.focus();
+				goToNextVariable();
 			}
 		}},
 		{ //Had to implement UP and DOWN for "noFocus" grid change in autocomplete window
 			key: Ext.EventObject.DOWN,
 			fn: function() {
 				var autoCoGrid	= Ext.getCmp('autoCoGrid');
-				if (! autoCoWindow.isHidden() && autoCoGrid.getSelectionModel().getSelection()[0].index < autoCoStore.getCount()-1) {
-					autoCoGrid.getSelectionModel().select(autoCoGrid.getSelectionModel().getSelection()[0].index+1);
-				} else {
-					autoCoGrid.getSelectionModel().select(0);
+				var regExGrid	= Ext.getCmp('regExGrid');
+
+				if (! autoCoWindow.isHidden()) {
+					if (autoCoGrid.getSelectionModel().getSelection()[0].index < autoCoStore.getCount()-1) {
+						autoCoGrid.getSelectionModel().select(autoCoGrid.getSelectionModel().getSelection()[0].index+1);
+					} else {
+						autoCoGrid.getSelectionModel().select(0);
+					}
 				}
-				editorFocus();
+
+				if (! regExWindow.isHidden()) {
+					if (! regExGrid.getSelectionModel().hasSelection()) {
+						regExGrid.getSelectionModel().select(0);
+					} else {
+						regExGrid.getSelectionModel().selectNext();
+					}
+				}
+				editor.focus();
 			}
+
 		},
 		{
 			key: Ext.EventObject.UP,
 			fn: function() {
 				var autoCoGrid	= Ext.getCmp('autoCoGrid');
-				if (! autoCoWindow.isHidden() && autoCoGrid.getSelectionModel().getSelection()[0].index > 0) {
-					autoCoGrid.getSelectionModel().select(autoCoGrid.getSelectionModel().getSelection()[0].index-1)
-				} else {
-					autoCoGrid.getSelectionModel().select(autoCoStore.getCount()-1);
+				var regExGrid	= Ext.getCmp('regExGrid');
+
+				if (! autoCoWindow.isHidden()) {
+					if (autoCoGrid.getSelectionModel().getSelection()[0].index > 0) {
+						autoCoGrid.getSelectionModel().select(autoCoGrid.getSelectionModel().getSelection()[0].index-1)
+					} else {
+						autoCoGrid.getSelectionModel().select(autoCoStore.getCount()-1);
+					}
 				}
-				editorFocus();
+
+				if (! regExWindow.isHidden()) {
+					regExGrid.getSelectionModel().selectPrevious();
+				}
+				editor.focus();
 			}
 		},
 		{
 			key: Ext.EventObject.TAB,
 			handler: function(key, e) {
 				e.preventDefault();
-				if (editor.isFocused()) {
-					if (searchPos < needlePos.length) {
-						searchPos++;
-						editor.find(needlePos[searchPos], {
-							backwards: false
-						});
-					}
-					if (searchPos+1 == needlePos.length) {
-						addTabCommand();
-					}
-					editor.focus();
-				}
+				goToNextVariable();
 			}
 		},
 		{
 			key: Ext.EventObject.ESC,
-			fn: function() {
-				if (! editor.isFocused()) {
-					Ext.getCmp('autoCoGrid').getSelectionModel().clearSelections();
-					autoCoWindow.hide();
-					autoCoStore.clearFilter();
-					editor.focus();
-					addCommand();
-					addTabCommand();
-				}
-			}
+			fn: cleanUp
 		},
 		{
-		// todo: not fully functional at the moment
-			key: Ext.EventObject.TAB,
-			shift: true,
-			handler: function(key, e) {
-				e.preventDefault();
-
-				if (searchPos > 0) {
-					--searchPos;
-					editor.find(needlePos[searchPos],  {
-						backwards: true
-					});
-				}
+			key: Ext.EventObject.BACKSPACE,
+			fn: function() {
+				editor.focus();
 			}
 		}
 	]);
