@@ -9,18 +9,20 @@ What Behace is capable off...
 
 - basic editor features like cut, edit, paste, undo, redo,...
 - Behace contains a behat syntax highlighting for typical catchwords(like 'Scenario', 'Given', 'When', 'Then' ,etc.) and quoted variable values
--	Write 'feature' files supported by the code completion for implemented sentences 
--	Organise and search in your 'feature' folder- and file-structure within Behace
--	Run your behat tests directly in the browser and check the results
-- selective test runs (mark certain scenarios in a feature file)
--	Open your feature-files simultaneously in a tab-structure
--	Review and filter all available sentences in a collapsible list
--	lock the editor (read only state)
--	search through the displayed feature file
--	a Settings window for defining basic Ace and Behat settings
-	-	Ace: ace themes, font-size, line highlighting,...
-	-	Behat: output format, flags for color and path output
--	handling for unsaved changes when closing a tab
+- Write 'feature' files supported by the code completion for implemented sentences
+	- ( added support for predefined options in sentences: Example: Given I have (option1|option2) )
+- Organise and search in your 'feature' folder- and file-structure within Behace
+- Run your behat tests directly in your browser and check the results
+- selective test runs (click on a Scenario-catchword to mark the line and run the 'selection only' option)
+- Open your feature-files simultaneously in a tab-structure
+- Review and filter all available sentences in a collapsible list
+- Lock the editor (read only state)
+- Search through the displayed feature file
+- A settings window for defining basic Ace and Behat settings
+	- Ace: ace themes, font-size, line highlighting,...
+	- Behat: output format, flags for color and path output
+- Handling for unsaved changes when closing a tab
+- Error Handling
 
 ...and what it is not
 -------
@@ -35,7 +37,7 @@ Requirements
 
 -	PHP >= 5.3.0
 -	Behat >= 2.4.0
--	read/write rights for the behat feature folder
+-	Read/Write permissions for the behat feature folder
 
 Included
 -------
@@ -46,20 +48,22 @@ Included
 Set up Behace
 -------
 
--	clone this repository
--	copy/rename the 'local_config_template.php' to 'local_config.php'
--	adjust the 'PATHTOBEHAT' constant in the 'local_config.php' file to the path to your Behat base directory
--	open Behace in your browser
+-	Clone this repository
+-	Copy/rename the 'local_config_template.php' to 'local_config.php'
+-	Adjust the 'PATHTOBEHAT' constant in the 'local_config.php' file to the path to your Behat base directory
+-	Open Behace in your browser
 
 How Behace works
 -------
 
--	create and/or open an existing 'feature' file
--	Start writing your 'Scenarios'
+-	Create and/or open an existing 'feature' file
+-	Start writing your description, 'Background', 'Scenarios', etc.
 -	The code completion feature should trigger if it finds suitable sentences
 -	Choose the sentence with the UP or DOWN arrow keys and hit enter for inserting the selected sentence
--	If the sentence contains variables, they should be automatically selected for replacing
+-	If the sentence contains variables or predefined selections, they are automatically selected for replacing
 -	Jump directly to the next (available) variable with the TAB button
+
+For more information, check out the wiki (coming soon).
 
 Contribute
 ----------
