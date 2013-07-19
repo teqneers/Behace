@@ -84,7 +84,10 @@ var wordStore	= Ext.create('Ext.data.Store', {
 			root: 'items'
 		}
 	},
-	groupers:[{ property: 'group', direction: 'ASC' }]
+	groupers:[{
+		property: 'group',
+		direction: 'ASC'
+	}]
 });
 
 // a syntax store for the autoocomplete feature
@@ -227,28 +230,12 @@ var autoCoWindow	= Ext.create('Ext.window.Window', {
 function searchNeedle(line) {
 	editorFocus();
 	var pos				= editor.getSelection().getCursor();
-	var counter			= 0;
 	var rowValue		= (line == null) ? editor.getSession().getLine(pos.row) : line;
-	var expression		= getTextInBrackets(rowValue);
-	for (var j = 0; j < expression.length; j++) {
-		expression[j]	= '('+expression[j]+')';
-	}
 	window.searchPos	= 0;
-	window.needlePos	= rowValue.split(' ');
+	window.needlePos	= rowValue.match(/\(([^\)]+)\)|%[a-z]+/g);
 	window.isSearch		= true;
 
-	// run through the splitted line array and search for 'variables'
-	for (var k = needlePos.length-1; k >= 0; k--) {
-		if (needlePos[k].match(/%/) == null && needlePos[k].match(/\|/) == null) {
-			needlePos.splice(k, 1);
-		} else if (needlePos[k].match(/%/) != null) {
-			needlePos[k]	= needlePos[k].replace(/"|:/g, '');
-		} else if (needlePos[k].match(/\|/) != null) {
-			needlePos[k]	= expression[counter];
-			counter++;
-		}
-	}
-	if (needlePos.length !== 0) {
+	if (needlePos != null && needlePos.length !== 0) {
 		editor.commands.removeCommand('indent');
 		editor.commands.removeCommand('outdent');
 		editor.navigateLineStart();
@@ -256,7 +243,7 @@ function searchNeedle(line) {
 			backwards: false,
 			range: editor.getSelection().getLineRange()
 		});
-		if (needlePos[searchPos].match(/\|/) != null) {
+		if (needlePos[searchPos].charAt(0) == '(') {
 			triggerRegExSelector();
 		}
 	}
@@ -273,14 +260,14 @@ function getTextInBrackets(string) {
 	while(text = regEx.exec(string)) {
 		result.push(text[1]);
 	}
-	return result.reverse();
+	return result;
 }
 
 /**
  * Builds a dropdown for regex variables, for easier use
  */
 function addSelectionToStore(line) {
-	if (line.match(/\|/) != null) {
+	if (line.charAt(0) == '(') {
 		var regExCount	= (line.split('(').length) - 2;
 		var expression	= getTextInBrackets(line);
 		var options		= expression[regExCount].split('|');
@@ -346,13 +333,14 @@ function goToNextVariable() {
 		editor.find(needlePos[searchPos], {
 			backwards: false
 		});
-		if (needlePos[searchPos].match(/\|/) != null) {
+		if (needlePos[searchPos].match(/\|/g) != null) {
 			triggerRegExSelector();
 		}
 	}
 	if (searchPos == needlePos.length || searchPos > needlePos.length) {
 		editor.navigateLineEnd();
 		cleanUp();
+		searchNeedle(null);
 	}
 	editor.focus();
 }
@@ -412,8 +400,11 @@ function selectScenario() {
  * Triggers the autocomplete window and filters the syntax
  */
 function triggerAutocomplete(e) {
-	var pos		= editor.getCursorPosition();
-	var dispPos	= editor.renderer.textToScreenCoordinates(pos.row, pos.column);
+	var pos				= editor.getCursorPosition();
+	var dispPos			= editor.renderer.textToScreenCoordinates(pos.row, pos.column);
+	var startingWord	= null;
+	var upperLine		= null;
+	var catchwords		= ['Given', 'When', 'Then'];
 
 	//show the autocomplete
 	window.rowValue	= editor.getSession().getLine(pos.row);
@@ -432,13 +423,14 @@ function triggerAutocomplete(e) {
 			window.isAnd	= true;
 			rowValue		= rowValue.replace('And', '');
 
-			//run up the lines until the editor finds when, then or given!
+			//run up the lines until the editor finds the Catchwords!
 			while (row != 1) {
-				if (editor.getSession().getLine(row).split(' ')[0].trim() == 'And') {
-					--row;
-				} else {
-					upperLine	= editor.getSession().getLine(row).split(' ')[0].trim();
+				startingWord	= editor.getSession().getLine(row).trim().split(' ')[0];
+				if (catchwords.indexOf(startingWord) != -1) {
+					upperLine	= editor.getSession().getLine(row).trim().split(' ')[0];
 					row			= 1;
+				} else {
+					--row;
 				}
 			}
 			var typed	= upperLine+' '+rowValue.trim();
@@ -447,7 +439,7 @@ function triggerAutocomplete(e) {
 		autoCoStore.filter('code', typed);
 		autoCoWindow.doLayout();
 
-		if (autoCoStore.getCount() !== 0 && e.data.text !== "\n" && rowValue.length <= 20 && rowValue.indexOf('|') == -1) {
+		if (autoCoStore.getCount() !== 0 && e.data.text !== "\n" && rowValue.length <= 40 && rowValue.indexOf('|') == -1) {
 			//positioning the autocomplete window depending on cursor pos
 			if ((window.screen.height - dispPos.pageY) < 250) {
 				autoCoWindow.showAt(dispPos.pageX-20, dispPos.pageY-100);
@@ -604,6 +596,127 @@ function enableButtons() {
 	Ext.getCmp('readOnlyButton').enable();
 }
 
+/**
+ * opens the file from the tree structure and sets basic listeners to editor
+ */
+function openFile(view, record, tabPanel) {
+	var isOpen		= false;
+	window.id		= record.get('id');
+	window.title	= record.get('text');
+	// check if the file is already open!!!
+	for (var j = 0; j < tabPanel.items.items.length; j++) {
+		if (title == tabPanel.items.items[j].title) {
+			isOpen		= true;
+			var tabId	= tabPanel.items.items[j].id;
+		}
+	}
+
+	if (isOpen) {
+		tabPanel.setActiveTab(tabId);
+	} else {
+		Ext.Ajax.request ({
+			url: 'ajax_behat.php',
+			method: 'post',
+			params: {
+				route: 'openFile',
+				file: id,
+				name: title
+			},
+			success: function(response) {
+				var tooltip	= response.responseText.split("\n\n");
+				tooltip		= tooltip[0].split("\n")[1];
+				var tab		= tabPanel.add({
+					title: title,
+					closable: true,
+					active: true,
+					tooltip: tooltip,
+					listeners: {
+						afterrender: function() {
+							editorFactory(this.id, id);
+							editor	= getEditor(this.id);
+						},
+						beforeclose: function(tab) {
+							// check if any changes were made to the file and ask user for handling
+							if (! editor.getSession().getUndoManager().isClean()) {
+								Ext.MessageBox.show({
+									title: 'Status',
+									msg: 'File changed! <br />Would you like to save your changes?',
+									buttons: Ext.MessageBox.YESNOCANCEL,
+									fn: function onCloseTab(btn) {
+										var tab	= tabPanel.getActiveTab();
+										switch(btn) {
+											case 'no':
+												destroyEditor(tab.id);
+												tab.events.beforeclose.clearListeners();
+												tab.close();
+												return false;
+												break;
+											case 'yes':
+												Ext.Ajax.request({
+													url: 'ajax_behat.php',
+													method: 'post',
+													params: {
+														route: 'saveFile',
+														id: getFileId(tabPanel.getActiveTab().id),
+														fileName : tabPanel.getActiveTab().title,
+														content: editor.getSession().getValue()
+													},
+													success: function(response) {
+														var answer	= response.responseText;
+														if (answer !== 'File saved successfully!') {
+															Ext.create('Ext.window.Window', {
+																title: 'Status',
+																autoScroll: true,
+																height: 250,
+																width: 600,
+																layout: 'fit',
+																html: '<pre>'+answer+'</pre>'
+															}).show();
+														}
+														editorFocus();
+														tabPanel.doLayout();
+														destroyEditor(tab.id);
+														tab.events.beforeclose.clearListeners();
+														tab.close();
+														return false;
+													}
+												})
+												break;
+											case 'cancel':
+												break;
+										}
+									}
+								})
+							} else {
+								destroyEditor(tab.id);
+								tab.events.beforeclose.clearListeners();
+								tab.close();
+								return false;
+							}
+							return false;
+						}
+					}
+				});
+				tabPanel.setActiveTab(tab);
+				var text	= response.responseText;
+				editor.getSession().setValue(text);
+				enableButtons();
+				editor.focus();
+				editor.navigateFileEnd();
+
+				// trigger autocomplete
+				editor.on('change', function(e) {
+					triggerAutocomplete(e);
+				});
+				//the scenario selection event
+				editor.on('click',selectScenario);
+				//trigger the regex option
+				editor.on('dblclick',triggerRegExSelectorOnClick);
+			}//success END
+		})
+	}//if isOpen else END
+}
+
 //####################################
 // onREADY
 //####################################
@@ -667,6 +780,8 @@ Ext.onReady(function() {
 				if (node.isLeaf()) {
 					deleteButton.enable();
 					newFileButton.disable();
+					// got back to single click open file, no dblclick anyymore
+					openFile(view, node, tabPanel);
 				} else if (node.isExpanded()) {
 					node.collapse();
 					deleteButton.enable();
@@ -675,127 +790,6 @@ Ext.onReady(function() {
 					node.expand();
 					deleteButton.enable();
 					newFileButton.enable();
-				}
-			},
-			itemdblclick: {
-				fn: function(view, record) {
-					var isOpen		= false;
-					window.id		= record.get('id');
-					window.title	= record.get('text');
-					// check if the file is already open!!!
-					for (var j = 0; j < tabPanel.items.items.length; j++) {
-						if (title == tabPanel.items.items[j].title) {
-							isOpen		= true;
-							var tabId	= tabPanel.items.items[j].id;
-						}
-					}
-
-					if (isOpen) {
-						tabPanel.setActiveTab(tabId);
-					} else {
-						Ext.Ajax.request ({
-							url: 'ajax_behat.php',
-							method: 'post',
-							params: {
-								route: 'openFile',
-								file: id,
-								name: title
-							},
-							success: function(response) {
-								var tooltip	= response.responseText.split("\n\n");
-								tooltip		= tooltip[0].split("\n")[1];
-								var tab		= tabPanel.add({
-									title: title,
-									closable: true,
-									active: true,
-									tooltip: tooltip,
-									listeners: {
-										afterrender: function() {
-											editorFactory(this.id, id);
-											editor	= getEditor(this.id);
-										},
-										beforeclose: function(tab) {
-											// check if any changes were made to the file and ask user for handling
-											if (! editor.getSession().getUndoManager().isClean()) {
-												Ext.MessageBox.show({
-													title: 'Status',
-													msg: 'File changed! <br />Would you like to save your changes?',
-													buttons: Ext.MessageBox.YESNOCANCEL,
-													fn: function onCloseTab(btn) {
-														var tab	= tabPanel.getActiveTab();
-														switch(btn) {
-															case 'no':
-																destroyEditor(tab.id);
-																tab.events.beforeclose.clearListeners();
-																tab.close();
-																return false;
-																break;
-															case 'yes':
-																saveMask.show();
-																Ext.Ajax.request({
-																	url: 'ajax_behat.php',
-																	method: 'post',
-																	params: {
-																		route: 'saveFile',
-																		id: getFileId(tabPanel.getActiveTab().id),
-																		fileName : tabPanel.getActiveTab().title,
-																		content: editor.getSession().getValue()
-																	},
-																	success: function(response) {
-																		var answer	= response.responseText;
-																		if (answer !== 'File saved successfully!') {
-																			Ext.create('Ext.window.Window', {
-																				title: 'Status',
-																				autoScroll: true,
-																				height: 250,
-																				width: 600,
-																				layout: 'fit',
-																				html: '<pre>'+answer+'</pre>'
-																			}).show();
-																		}
-																		saveMask.hide();
-																		editorFocus();
-																		tabPanel.doLayout();
-																		destroyEditor(tab.id);
-																		tab.events.beforeclose.clearListeners();
-																		tab.close();
-																		return false;
-																	}
-																})
-																break;
-															case 'cancel':
-																break;
-														}
-													}
-												})
-											} else {
-												destroyEditor(tab.id);
-												tab.events.beforeclose.clearListeners();
-												tab.close();
-												return false;
-											}
-											return false;
-										}
-									}
-								});
-								tabPanel.setActiveTab(tab);
-								var text	= response.responseText;
-								editor.getSession().setValue(text);
-								enableButtons();
-								editor.focus();
-								editor.navigateFileEnd();
-
-								// trigger autocomplete
-								editor.on('change', function(e) {
-									triggerAutocomplete(e);
-								});
-								//the scenario selection event
-								editor.on('click',selectScenario);
-								//trigger the regex option
-								editor.on('dblclick',triggerRegExSelectorOnClick);
-							}//success END
-						})
-					}//if isOpen else END
 				}
 			}
 		}
@@ -1293,7 +1287,7 @@ Ext.onReady(function() {
 		} //handler END
 	});
 
-	// option to set editor to read only state
+	// option to set editor to read only mode
 	var readOnlyButton	= Ext.create('Ext.Button', {
 		id: 'readOnlyButton',
 		pressed: false,
@@ -1324,7 +1318,8 @@ Ext.onReady(function() {
 		listeners: {
 			'change': function() {
 				if (this.value.length > 2) {
-					editor.find(this.value);
+					editor.navigateFileStart();
+					editor.find(this.getValue());
 				}
 			},
 			'specialkey': function(f,e) {
@@ -1334,6 +1329,10 @@ Ext.onReady(function() {
 				if (e.getKey() == e.ESC) {
 					this.setValue('');
 					editorFocus();
+				}
+				if (e.getKey() == e.BACKSPACE) {
+					editor.navigateFileStart();
+					editor.find(searchText.getValue());
 				}
 			}
 		}
@@ -1604,7 +1603,13 @@ Ext.onReady(function() {
 				regExWindow.hide();
 				regExStore.removeAll();
 				editor.focus();
-				goToNextVariable();
+				// check if RegEx contains variables, if true: start search all over again, for better workflow
+				if (needlePos[searchPos].match(/%/g) != null) {
+					cleanUp();
+					searchNeedle(null);
+				} else {
+					goToNextVariable();
+				}
 			}
 		}},
 		{ //Had to implement UP and DOWN for "noFocus" grid change in autocomplete window
@@ -1662,12 +1667,6 @@ Ext.onReady(function() {
 		{
 			key: Ext.EventObject.ESC,
 			fn: cleanUp
-		},
-		{
-			key: Ext.EventObject.BACKSPACE,
-			fn: function() {
-				editor.focus();
-			}
 		}
 	]);
 

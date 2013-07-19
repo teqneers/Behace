@@ -84,11 +84,15 @@ switch ($_REQUEST['route']) {
 		// filters for replacing regexp for better understanding
 		$replaceFilter	= array(
 			'(\d+)'			=> '%number',
+			'[\d]{4}'		=> '%year',
+			'[\d]{2}'		=> '%month',
 			'(.*)'			=> '%type',
 			'(\w+)'			=> '%type',
 			'</comment>'	=> '',
-			'd{4}'			=> '%number',
-			'd{2}'			=> '%number',
+			'd{4}'			=> '%year',
+			'd{2}'			=> '%month',
+			'd]{1,2}'		=> '%month',
+			'd{1,2}'		=> '%month',
 			'([\d.,]+)'		=> '%number'
 		);
 
